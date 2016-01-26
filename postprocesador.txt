@@ -1,0 +1,230 @@
+post procesador payment
+package com.kony.banking200.postprocessors;
+
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+
+import org.apache.log4j.Logger;
+
+import com.kony.banking200.util.BankingProcessorUtilities;
+import com.konylabs.middleware.common.DataPostProcessor;
+import com.konylabs.middleware.controller.DataControllerRequest;
+import com.konylabs.middleware.dataobject.Dataset;
+import com.konylabs.middleware.dataobject.Param;
+import com.konylabs.middleware.dataobject.Record;
+import com.konylabs.middleware.dataobject.Result;
+import com.konylabs.middleware.session.Session;
+
+public class AccountsListPaymentFromPostProcessor implements DataPostProcessor {
+
+	private static final Logger LOG = Logger
+			.getLogger(AccountsListPaymentFromPostProcessor.class);
+
+	@Override
+	public Object execute(Result results, DataControllerRequest request)
+			throws Exception {
+		try {
+			Session session = request.getSession(false);
+			// LOG.info(" Test Modify Accounts Map ");
+			String deviceChannel = (String) session
+					.getAttribute("deviceChannel");
+			String groupingOnOff = "";
+			if (session != null) {
+			}
+
+			Map<String, String> middlewareConfiguration = (HashMap<String, String>) session
+					.getAttribute("middlewareConfiguration");
+
+			String maskingCharacter = middlewareConfiguration
+					.get("preference.common.AccountMasking.MaskingCharacter.ValueVA");
+			String noOfMaskingCharactersFromLeft = middlewareConfiguration
+					.get("preference.common.AccountMasking.NoOfMaskingCharactersFromLeft.ValueVA");
+			String noOfCharactersToDisplayFromRight = middlewareConfiguration
+					.get("preference.common.AccountMasking.NoOfCharactersToDisplayFromRight.ValueVA");
+			int paymentFromPaginationSize = Integer
+					.parseInt(middlewareConfiguration
+							.get("preference.common.AccountsHome.paginationSize.valueVA"));
+
+			Dataset paymentFromDataSet = new Dataset();
+			// int AccountAliasID = 12345;
+			ArrayList<Dataset> ds = results.getDataSets();
+			// LOG.info("DataSet Length: " + ds.size());
+
+			for (Dataset dataset : ds) {
+				ArrayList<Record> records = dataset.getRecords();
+
+				// LOG.info("Records Length: " + records.size());
+				for (Record record : records) {
+					ArrayList<Param> params = record.getParams();
+					// LOG.info("Params Length: " + params.size());
+					String accountType = "";
+					String OriginalAccountNumber = "";
+					boolean omitirCuenta = false;
+
+					for (Param param : params) {
+						LOG.info("Param ID Test: " + param.getName());
+						// LOG.info("Param ID: " + param.getValue());
+						if (param.getName().equals("accountType")) {
+							accountType = param.getValue().trim();
+							param.setValue(accountType);
+						} else if (param.getName().equals("accountNumber")) {
+							OriginalAccountNumber = param.getValue();
+							String accountNumber = param.getValue();
+							accountNumber = BankingProcessorUtilities
+									.getMaskedAccountNumber(
+											accountNumber,
+											maskingCharacter,
+											Integer.parseInt(noOfMaskingCharactersFromLeft),
+											Integer.parseInt(noOfCharactersToDisplayFromRight));
+							param.setValue(accountNumber);
+							// LOG.info("Param ID Test:repeatX accountNumber"+
+							// accountNumber);
+						} // End If - Account Number
+						else if (param.getName().equals("availableBalance")) {
+							param.setValue(BankingProcessorUtilities.formatAmountTwoDecimalPlacesBMSC(param.getValue()));
+							//Kender Astudillo. 13/02/2015 codigo original comentado
+							/*param.setValue(BankingProcessorUtilities
+									.formatAmountTwoDecimalPlaces(BankingProcessorUtilities
+											.convertToCurrencyFormat(param
+													.getValue()))); */ 
+						} else if (param.getName().equals("currentBalance")) {
+							param.setValue(BankingProcessorUtilities.formatAmountTwoDecimalPlacesBMSC(param.getValue()));
+							//Kender Astudillo. 13/02/2015 codigo original comentado
+							/*param.setValue(BankingProcessorUtilities
+									.formatAmountTwoDecimalPlaces(BankingProcessorUtilities
+											.convertToCurrencyFormat(param
+													.getValue()))); */ 
+						}else if (param.getName().equals("pTipoManejo")) {
+						      String tipodeManejo = param.getValue().trim();
+						      LOG.info("tipo de Manejo: " + tipodeManejo);
+						        if (tipodeManejo.equals("C") ){
+						        	omitirCuenta = true;
+						      }
+						}
+					
+
+					} // End for - params
+					Param accountIDParam = new Param();
+					accountIDParam.setName("AccountAliasID");
+
+					accountIDParam.setValue(BankingProcessorUtilities
+							.encrypt(OriginalAccountNumber + ""));
+					params.add(accountIDParam);
+					//Sybven Kender Astudillo 17/02/2015 para Filtrar Cuentas conjuntas y mostrar solo las cuentas Unipersonales 
+					LOG.info("Omitir Cuenta:" + omitirCuenta);
+					if(!omitirCuenta){
+					paymentFromDataSet.setRecord(record);
+					}
+					
+					//paymentFromDataSet.setRecord(record); sybven-Kender Astudillo codigo original comentado
+					// LOG.info("into elseeeeee alllll Params Length:accountType "+
+					// accountType);
+				} // End for - Records
+
+			} // End for - DataSet
+
+			ArrayList<Param> params = results.getParamList();
+			for (Param param : params) {
+				if (param.getName().equals("CurrentDate")) {
+					// LOG.info("Accounts Changed Key - Value: " +
+					// "CurrentDate"+
+					// " = " + param.getValue());
+					String dfFormat = param.getValue();
+					// LOG.info(" Date dfFormat" + dfFormat);
+					Date d = new Date(dfFormat);
+					// LOG.info(" Date " + d);
+					SimpleDateFormat dfFormat1 = new SimpleDateFormat(
+							"dd/MM/yyyy HH:mm");
+					// LOG.info(" dfFormat1 dfFormat1 " + dfFormat1);
+					// Sybven - Kender Astudillo - codigo dfFormat1.format(d) comentado para pruebas
+					//dfFormat1.format(d);
+					// LOG.info("test " + new Date());
+					// LOG.info("formatted Date " + d);
+					param.setValue(dfFormat1.format(d).toString());
+				}
+			}
+
+			// LOG.info("ACOOUNTS TEST");
+			// LOG.info("DataSet accountsMap : " + accountsMap);
+			session.setAttribute("paymentFromPaginationData",
+					paymentFromDataSet);
+			session.setAttribute("paymentFromMaxRecordsPerPage",
+					paymentFromPaginationSize);
+
+			Dataset allAccountsResult = new Dataset("account");
+			// LOG.info("accountsPaginationSize: " +
+			// paymentFromPaginationSize);
+
+			ArrayList<Dataset> dataSetList = results.getDataSets();
+			dataSetList.removeAll(dataSetList);
+			results.setDataSets(dataSetList);
+
+			ArrayList<Record> paymentFromArray = paymentFromDataSet
+					.getRecords();
+			// LOG.info("All Accounts Size: " + paymentFromArray.size());
+			session.setAttribute("paymentFromMaxRecordsAllowed",
+					paymentFromArray.size());
+			if (paymentFromArray != null && paymentFromArray.size() > 0) {
+				int counter = 0;
+				if (paymentFromArray.size() < paymentFromPaginationSize)
+					counter = paymentFromArray.size();
+				else {
+					counter = paymentFromPaginationSize;
+				}
+				for (int i = 0; i < counter; i++) {
+					allAccountsResult.setRecord((Record) paymentFromArray
+							.get(i));
+				}
+
+				if ((deviceChannel.equalsIgnoreCase("ipad"))|| (deviceChannel.equalsIgnoreCase("tabletandroid"))) {
+					groupingOnOff = middlewareConfiguration
+							.get("preference.tablet.TfrmPaymentsHomeVA.FromAccountList.GroupByType.VisibilityVA");
+				} else {
+					groupingOnOff = middlewareConfiguration
+							.get("preference.phone.frmPaymentsSelectAccountVA.GroupByType.VisibilityVA");
+				}
+				if (groupingOnOff.equalsIgnoreCase("ON"))
+					allAccountsResult = BankingProcessorUtilities
+							.groupByAccount(allAccountsResult);
+				allAccountsResult.setId("account");
+				results.setDataSet(allAccountsResult);
+			}
+			// LOG.info("All Accounts Results Size: "+
+			// allAccountsResult.getRecords().size());
+
+			// -------------------------
+			ArrayList<Param> paramList = results.getParamList();
+			Param totalNoOfAccounts = new Param();
+			totalNoOfAccounts.setName("totalNoOfTransferAccountsPages");
+			int noOfPages;
+			if ((paymentFromArray.size() % paymentFromPaginationSize) == 0) {
+				noOfPages = (paymentFromArray.size() / paymentFromPaginationSize);
+			} else {
+				noOfPages = (paymentFromArray.size() / paymentFromPaginationSize) + 1;
+			}
+
+			totalNoOfAccounts.setValue(noOfPages + "");
+			paramList.add(totalNoOfAccounts);
+			Param paginationSize = new Param();
+			paginationSize.setName("paginationSize");
+			paginationSize.setValue(paymentFromPaginationSize + "");
+			paramList.add(paginationSize);
+
+			// LOG.info("Final Results :  " + results.toString());
+			return results;
+		} catch (Exception e) {
+			// LOG.info("Final Results :  " + results.toString());
+			Param errorCode = new Param();
+			errorCode.setName("errorCode");
+			errorCode.setValue("205");
+			results.setParam(errorCode);
+			return BankingProcessorUtilities.getErrorMessageAndAction(results,
+					request);
+		}
+
+	}
+
+}
